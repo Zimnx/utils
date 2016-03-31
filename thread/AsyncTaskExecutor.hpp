@@ -13,20 +13,20 @@ namespace detail {
 
 template <typename Task, typename Callback, typename ResultType>
 struct TaskCallStrategy {
-    static void call(Task&& task, Callback&& callback) {
+    static inline void call(Task&& task, Callback&& callback) {
       callback(task());
     }
 };
 
 template <typename Task, typename Callback>
 struct TaskCallStrategy<Task, Callback, void> {
-    static void call(Task&& task, Callback&& callback) {
+    static inline void call(Task&& task, Callback&& callback) {
       task();
       callback();
     }
 };
 
-}
+} // namespace detail
 
 template<typename Task, typename Callback = std::function<void(typename Task::result_type)>>
 class AsyncTaskExecutor {
