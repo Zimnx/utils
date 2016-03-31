@@ -13,14 +13,14 @@ namespace detail {
 
 template <typename Task, typename Callback, typename ResultType>
 struct TaskCallStrategy {
-    static inline void call(Task&& task, Callback&& callback) {
+    static inline void call(const Task& task, const Callback& callback) {
       callback(task());
     }
 };
 
 template <typename Task, typename Callback>
 struct TaskCallStrategy<Task, Callback, void> {
-    static inline void call(Task&& task, Callback&& callback) {
+    static inline void call(const Task& task, const Callback& callback) {
       task();
       callback();
     }
@@ -48,9 +48,9 @@ class AsyncTaskExecutor {
       m_thread.join();
     }
 
-    void scheduleTask(Task&& task, Callback&& callback) {
+    void scheduleTask(Task task, Callback callback) {
       std::unique_lock<std::mutex> lock(m_mutex);
-      m_queue.emplace_back(task, callback);
+      m_queue.emplace_back(std::move(task), std::move(callback));
       lock.unlock();
       m_cond.notify_one();
     }
@@ -69,14 +69,14 @@ class AsyncTaskExecutor {
           break;
         }
 
-        const TaskWithCallback& taskWithCallback = m_queue.front();
+        TaskWithCallback taskWithCallback = m_queue.front();
         m_queue.pop_front();
         lock.unlock();
 
-        Task task = taskWithCallback.first;
-        Callback callback = taskWithCallback.second;
+        const Task& task = taskWithCallback.first;
+        const Callback& callback = taskWithCallback.second;
 
-        detail::TaskCallStrategy<Task, Callback, ResultType>::call(std::move(task), std::move(callback));
+        detail::TaskCallStrategy<Task, Callback, ResultType>::call(task, callback);
       }
     }
 
