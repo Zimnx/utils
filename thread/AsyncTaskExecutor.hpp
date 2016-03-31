@@ -11,36 +11,6 @@
 
 namespace detail {
 
-template<class Derived, class ContainerValueType>
-class AsyncTaskExecutorBase {
-  public:
-
-    AsyncTaskExecutorBase()
-      : m_ending{false}
-    {
-      m_thread = std::thread { &AsyncTaskExecutorBase::worker, this };
-    }
-
-    virtual ~AsyncTaskExecutorBase() {
-      m_ending = true;
-      m_cond.notify_one();
-      m_thread.join();
-    }
-
-    void worker() {
-      static_cast<Derived*>(this)->worker();
-    }
-
-    using Queue = std::deque<ContainerValueType>;
-
-    std::thread m_thread;
-    std::mutex m_mutex;
-    std::condition_variable m_cond;
-    bool m_ending;
-
-    Queue m_queue;
-};
-
 template <typename Task, typename Callback, typename ResultType>
 struct TaskCallStrategy {
     static void call(Task&& task, Callback&& callback) {
@@ -59,34 +29,48 @@ struct TaskCallStrategy<Task, Callback, void> {
 }
 
 template<typename Task, typename Callback = std::function<void(typename Task::result_type)>>
-class AsyncTaskExecutor : public detail::AsyncTaskExecutorBase<AsyncTaskExecutor<Task, Callback>, std::pair<Task, Callback>> {
+class AsyncTaskExecutor {
 
     using ResultType = typename Task::result_type;
     using TaskWithCallback = std::pair<Task, Callback>;
 
   public:
 
-    void scheduleTask(Task&& task, Callback&& callback) {
-      std::unique_lock<std::mutex> lock(this->m_mutex);
-      this->m_queue.emplace_back(task, callback);
-      lock.unlock();
-      this->m_cond.notify_one();
+    AsyncTaskExecutor()
+      : m_ending{false}
+    {
+      m_thread = std::thread { &AsyncTaskExecutor::worker, this };
     }
+
+    virtual ~AsyncTaskExecutor() {
+      m_ending = true;
+      m_cond.notify_one();
+      m_thread.join();
+    }
+
+    void scheduleTask(Task&& task, Callback&& callback) {
+      std::unique_lock<std::mutex> lock(m_mutex);
+      m_queue.emplace_back(task, callback);
+      lock.unlock();
+      m_cond.notify_one();
+    }
+
+  private:
 
     void worker() {
       for(;;) {
-        std::unique_lock<std::mutex> lock(this->m_mutex);
+        std::unique_lock<std::mutex> lock(m_mutex);
 
-        if (this->m_queue.empty()) {
-          this->m_cond.wait(lock, [=]{ return this->m_ending || !this->m_queue.empty(); });
+        if (m_queue.empty()) {
+          m_cond.wait(lock, [=]{ return m_ending || !m_queue.empty(); });
         }
 
-        if (this->m_ending) {
+        if (m_ending) {
           break;
         }
 
-        const TaskWithCallback& taskWithCallback = this->m_queue.front();
-        this->m_queue.pop_front();
+        const TaskWithCallback& taskWithCallback = m_queue.front();
+        m_queue.pop_front();
         lock.unlock();
 
         Task task = taskWithCallback.first;
@@ -95,6 +79,13 @@ class AsyncTaskExecutor : public detail::AsyncTaskExecutorBase<AsyncTaskExecutor
         detail::TaskCallStrategy<Task, Callback, ResultType>::call(std::move(task), std::move(callback));
       }
     }
+
+    std::thread m_thread;
+    std::mutex m_mutex;
+    std::condition_variable m_cond;
+    bool m_ending;
+
+    std::deque<TaskWithCallback> m_queue;
 };
 
 using SimpleAsyncTaskExecutor = AsyncTaskExecutor<std::function<void()>, std::function<void()>>;
