@@ -13,25 +13,43 @@ namespace detail {
 
 template <typename Task, typename Callback, typename ResultType>
 struct TaskCallStrategy {
-    static inline void call(const Task& task, const Callback& callback) {
-      callback(task());
-    }
+  static inline void call(const Task& task, const Callback& callback) {
+    callback(task());
+  }
 };
 
 template <typename Task, typename Callback>
 struct TaskCallStrategy<Task, Callback, void> {
-    static inline void call(const Task& task, const Callback& callback) {
-      task();
-      callback();
-    }
+  static inline void call(const Task& task, const Callback& callback) {
+    task();
+    callback();
+  }
 };
+
+template<typename T>
+struct CallbackType {
+  using type = std::function<void(T)>;
+};
+
+template<>
+struct CallbackType<void> {
+  using type = std::function<void()>;
+};
+
+template<typename T>
+using CallbackType_t = typename CallbackType<T>::type;
 
 } // namespace detail
 
-template<typename Task, typename Callback = std::function<void(typename Task::result_type)>>
-class AsyncTaskExecutor {
+template<class>
+class AsyncTaskExecutor;
 
-    using ResultType = typename Task::result_type;
+template<class R, class... Args >
+class AsyncTaskExecutor<R(Args...)> {
+
+    using ResultType = R;
+    using Callback = detail::CallbackType_t<R>;
+    using Task = std::function<R(Args...)>;
     using TaskWithCallback = std::pair<Task, Callback>;
 
   public:
@@ -61,7 +79,7 @@ class AsyncTaskExecutor {
       for(;;) {
         std::unique_lock<std::mutex> lock(m_mutex);
 
-        if (m_queue.empty()) {
+        if (this->m_queue.empty()) {
           m_cond.wait(lock, [=]{ return m_ending || !m_queue.empty(); });
         }
 
@@ -87,5 +105,3 @@ class AsyncTaskExecutor {
 
     std::deque<TaskWithCallback> m_queue;
 };
-
-using SimpleAsyncTaskExecutor = AsyncTaskExecutor<std::function<void()>, std::function<void()>>;
