@@ -79,7 +79,7 @@ class AsyncTaskExecutor<R(Args...)> {
       for(;;) {
         std::unique_lock<std::mutex> lock(m_mutex);
 
-        if (this->m_queue.empty()) {
+        if (m_queue.empty()) {
           m_cond.wait(lock, [=]{ return m_ending || !m_queue.empty(); });
         }
 
