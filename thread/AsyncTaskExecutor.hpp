@@ -11,20 +11,25 @@
 
 namespace detail {
 
-template <typename Task, typename Callback, typename ResultType>
+template <typename ResultType>
 struct TaskCallStrategy {
-  template<class Tuple, std::size_t... Is>
-  static inline void call(const Callback& callback, const Task& task, const Tuple& tuple, std::index_sequence<Is...> is) {
-    callback(task(std::get<Is>(tuple)...));
+  template<class Callback, class Task, class ArgsTuple, std::size_t... Is>
+  static inline void call(const Callback& callback, const Task& task, const ArgsTuple& tuple, std::index_sequence<Is...> is) {
+    ResultType result = task(std::get<Is>(tuple)...);
+    if (callback) {
+      callback(std::move(result));
+    }
   }
 };
 
-template <typename Task, typename Callback>
-struct TaskCallStrategy<Task, Callback, void> {
-  template<class Tuple, std::size_t... Is>
-  static inline void call(const Callback& callback, const Task& task, const Tuple& tuple, std::index_sequence<Is...> is) {
+template <>
+struct TaskCallStrategy<void> {
+  template<class Callback, class Task, class ArgsTuple, std::size_t... Is>
+  static inline void call(const Callback& callback, const Task& task, const ArgsTuple& tuple, std::index_sequence<Is...> is) {
     task(std::get<Is>(tuple)...);
-    callback();
+    if (callback) {
+      callback();
+    }
   }
 };
 
@@ -39,7 +44,7 @@ struct CallbackType<void> {
 };
 
 template<typename T>
-using CallbackType_t = typename CallbackType<T>::type;
+using CallbackType_T = typename CallbackType<T>::type;
 
 } // namespace detail
 
@@ -50,7 +55,7 @@ template<class R, class... Args >
 class AsyncTaskExecutor<R(Args...)> {
 
     using ResultType = R;
-    using Callback = detail::CallbackType_t<R>;
+    using Callback = detail::CallbackType_T<R>;
     using Task = std::function<R(Args...)>;
 
     struct CallParameters {
@@ -87,6 +92,10 @@ class AsyncTaskExecutor<R(Args...)> {
       m_cond.notify_one();
     }
 
+    void schedule(Task&& task, Args&&... args) {
+      schedule(Callback(), std::forward<Task>(task), std::forward<Args>(args)...);
+    }
+
   private:
 
     void worker() {
@@ -105,10 +114,10 @@ class AsyncTaskExecutor<R(Args...)> {
         m_queue.pop_front();
         lock.unlock();
 
-        detail::TaskCallStrategy<Task, Callback, ResultType>::call(callParams.callback,
-                                                                   callParams.task,
-                                                                   callParams.args,
-                                                                   std::make_index_sequence<sizeof...(Args)>());
+        detail::TaskCallStrategy<ResultType>::call(callParams.callback,
+                                                   callParams.task,
+                                                   callParams.args,
+                                                   std::make_index_sequence<sizeof...(Args)>());
       }
     }
 
