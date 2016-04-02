@@ -101,15 +101,13 @@ class AsyncTaskExecutor<R(Args...)> {
           break;
         }
 
-        CallParameters taskWithCallback = m_queue.front();
+        CallParameters callParams = m_queue.front();
         m_queue.pop_front();
         lock.unlock();
 
-        const Task& task = taskWithCallback.task;
-        const Callback& callback = taskWithCallback.callback;
-        const std::tuple<Args...> args = taskWithCallback.args;
-
-        detail::TaskCallStrategy<Task, Callback, ResultType>::call(callback, task, args,
+        detail::TaskCallStrategy<Task, Callback, ResultType>::call(callParams.callback,
+                                                                   callParams.task,
+                                                                   callParams.args,
                                                                    std::make_index_sequence<sizeof...(Args)>());
       }
     }
