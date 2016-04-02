@@ -13,15 +13,17 @@ namespace detail {
 
 template <typename Task, typename Callback, typename ResultType>
 struct TaskCallStrategy {
-  static inline void call(const Task& task, const Callback& callback) {
-    callback(task());
+  template<class Tuple, std::size_t... Is>
+  static inline void call(const Callback& callback, const Task& task, const Tuple& tuple, std::index_sequence<Is...> is) {
+    callback(task(std::get<Is>(tuple)...));
   }
 };
 
 template <typename Task, typename Callback>
 struct TaskCallStrategy<Task, Callback, void> {
-  static inline void call(const Task& task, const Callback& callback) {
-    task();
+  template<class Tuple, std::size_t... Is>
+  static inline void call(const Callback& callback, const Task& task, const Tuple& tuple, std::index_sequence<Is...> is) {
+    task(std::get<Is>(tuple)...);
     callback();
   }
 };
@@ -50,7 +52,17 @@ class AsyncTaskExecutor<R(Args...)> {
     using ResultType = R;
     using Callback = detail::CallbackType_t<R>;
     using Task = std::function<R(Args...)>;
-    using TaskWithCallback = std::pair<Task, Callback>;
+
+    struct CallParameters {
+        CallParameters(Callback&& callback, Task&& task, std::tuple<Args...>&& args)
+          : callback(std::forward<Callback>(callback))
+          , task(std::forward<Task>(task))
+          , args(std::forward<std::tuple<Args...>>(args))
+        {}
+        Callback callback;
+        Task task;
+        std::tuple<Args...> args;
+    };
 
   public:
 
@@ -66,9 +78,11 @@ class AsyncTaskExecutor<R(Args...)> {
       m_thread.join();
     }
 
-    void scheduleTask(Task task, Callback callback) {
+    void schedule(Callback&& callback, Task&& task, Args&&... args) {
       std::unique_lock<std::mutex> lock(m_mutex);
-      m_queue.emplace_back(std::move(task), std::move(callback));
+      m_queue.emplace_back(std::forward<Callback>(callback),
+                           std::forward<Task>(task),
+                           std::forward_as_tuple(args...));
       lock.unlock();
       m_cond.notify_one();
     }
@@ -87,14 +101,16 @@ class AsyncTaskExecutor<R(Args...)> {
           break;
         }
 
-        TaskWithCallback taskWithCallback = m_queue.front();
+        CallParameters taskWithCallback = m_queue.front();
         m_queue.pop_front();
         lock.unlock();
 
-        const Task& task = taskWithCallback.first;
-        const Callback& callback = taskWithCallback.second;
+        const Task& task = taskWithCallback.task;
+        const Callback& callback = taskWithCallback.callback;
+        const std::tuple<Args...> args = taskWithCallback.args;
 
-        detail::TaskCallStrategy<Task, Callback, ResultType>::call(task, callback);
+        detail::TaskCallStrategy<Task, Callback, ResultType>::call(callback, task, args,
+                                                                   std::make_index_sequence<sizeof...(Args)>());
       }
     }
 
@@ -103,5 +119,5 @@ class AsyncTaskExecutor<R(Args...)> {
     std::condition_variable m_cond;
     bool m_ending;
 
-    std::deque<TaskWithCallback> m_queue;
+    std::deque<CallParameters> m_queue;
 };
